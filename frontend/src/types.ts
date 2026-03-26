@@ -9,6 +9,7 @@ export type Topic = {
 
 export type SkillNode = {
   id: string
+  skill_id: number
   label: string
   /** `skills.short_name` — shown on the graph node. */
   short_name: string
@@ -33,5 +34,25 @@ export type GraphResponse = {
     source: string
     target: string
   }>
+}
+
+export type NodePosition = {
+  x: number
+  y: number
+}
+
+export type NodePositions = Record<string, NodePosition>
+
+export type NodePositionsResponse = {
+  positions: NodePositions
+}
+
+export type SaveNodePositionsRequest = {
+  positions: NodePositions
+}
+
+export type SkillPrerequisitePayload = {
+  source_skill_id: number
+  target_skill_id: number
 }
 

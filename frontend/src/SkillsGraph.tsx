@@ -1,17 +1,26 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   ReactFlow,
   Background,
   Controls,
+  addEdge,
+  MarkerType,
   useNodesState,
   useEdgesState,
   type Node,
   type Edge,
+  type Connection,
   type NodeMouseHandler,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 
-import { fetchSkillsGraph } from './api'
+import {
+  createSkillPrerequisite,
+  deleteSkillPrerequisite,
+  fetchNodePositions,
+  fetchSkillsGraph,
+  saveNodePositions,
+} from './api'
 import type { GraphResponse } from './types'
 import { topicColor } from './color'
 import { layoutSkillsByTopic } from './layout'
@@ -22,6 +31,12 @@ type LoadState =
   | { kind: 'loading' }
   | { kind: 'error'; message: string }
   | { kind: 'ready'; data: GraphResponse }
+type SaveState = { kind: 'idle' } | { kind: 'saving' } | { kind: 'saved' } | { kind: 'error'; message: string }
+type EdgeMutationState =
+  | { kind: 'idle' }
+  | { kind: 'saving' }
+  | { kind: 'saved' }
+  | { kind: 'error'; message: string }
 
 export type SelectedSkillDetail = {
   id: string
@@ -32,6 +47,14 @@ export type SelectedSkillDetail = {
   grade_from: number
   grade_to: number
   skill_cke_code: string
+}
+
+function getHandlesByNodeY(sourceY?: number, targetY?: number): { sourceHandle?: string; targetHandle?: string } {
+  if (sourceY == null || targetY == null) return {}
+  if (targetY < sourceY) {
+    return { sourceHandle: 'source-top', targetHandle: 'target-bottom' }
+  }
+  return { sourceHandle: 'source-bottom', targetHandle: 'target-top' }
 }
 
 function hexToRgba(hex: string, alpha: number): string {
@@ -60,15 +83,22 @@ export function SkillsGraph(props: {
   highlightTopicId?: number | null
 }) {
   const [state, setState] = useState<LoadState>({ kind: 'loading' })
+  const [savedPositions, setSavedPositions] = useState<Record<string, { x: number; y: number }>>({})
+  const [saveState, setSaveState] = useState<SaveState>({ kind: 'idle' })
+  const [edgeMutationState, setEdgeMutationState] = useState<EdgeMutationState>({ kind: 'idle' })
   const [selectedSkill, setSelectedSkill] = useState<SelectedSkillDetail | null>(null)
   const { onTopicsLoaded, onSummaryLoaded, highlightTopicId } = props
   const { width, height } = useWindowSize()
 
   useEffect(() => {
     const ctrl = new AbortController()
-    fetchSkillsGraph(ctrl.signal)
-      .then((data) => {
+    Promise.all([
+      fetchSkillsGraph(ctrl.signal),
+      fetchNodePositions(ctrl.signal).catch(() => ({} as Record<string, { x: number; y: number }>)),
+    ])
+      .then(([data, positions]) => {
         setState({ kind: 'ready', data })
+        setSavedPositions(positions)
         onTopicsLoaded?.(data.topics)
         onSummaryLoaded?.({ topics: data.topics.length, skills: data.nodes.length })
       })
@@ -81,6 +111,18 @@ export function SkillsGraph(props: {
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
+  const skillIdByNodeId = useMemo(() => {
+    if (state.kind !== 'ready') return new Map<string, number>()
+    return new Map(state.data.nodes.map((n) => [n.id, n.skill_id] as const))
+  }, [state])
+  const hasUnsavedChanges = useMemo(() => {
+    if (nodes.length === 0) return false
+    return nodes.some((node) => {
+      const saved = savedPositions[node.id]
+      if (!saved) return true
+      return saved.x !== node.position.x || saved.y !== node.position.y
+    })
+  }, [nodes, savedPositions])
 
   useEffect(() => {
     if (state.kind !== 'ready') {
@@ -93,11 +135,6 @@ export function SkillsGraph(props: {
       highlightTopicId == null
         ? null
         : new Set(state.data.nodes.filter((n) => n.topic_id === highlightTopicId).map((n) => n.id))
-    const topicByNodeId =
-      highlightTopicId == null
-        ? null
-        : new Map(state.data.nodes.map((n) => [n.id, n.topic_cke_code] as const))
-
     const layout = layoutSkillsByTopic({
       topics: state.data.topics,
       nodes: state.data.nodes,
@@ -110,7 +147,7 @@ export function SkillsGraph(props: {
       return layout.positioned.map((n) => ({
         id: n.id,
         type: 'skill' as const,
-        position: posById.get(n.id) ?? { x: n.x, y: n.y },
+        position: posById.get(n.id) ?? savedPositions[n.id] ?? { x: n.x, y: n.y },
         data: {
           label: n.label,
           short_name: n.short_name,
@@ -124,10 +161,10 @@ export function SkillsGraph(props: {
         draggable: true,
         style: (() => {
           const base = {
-            padding: '5px 7px',
-            borderRadius: 8,
-            maxWidth: 140,
-            minWidth: 0,
+            padding: '8px 10px',
+            borderRadius: 16,
+            width: 110,
+            minWidth: 110,
             boxSizing: 'border-box' as const,
             color: '#111827',
             transition:
@@ -165,31 +202,52 @@ export function SkillsGraph(props: {
       }))
     })
 
+    const nodeYById = new Map(layout.positioned.map((n) => [n.id, savedPositions[n.id]?.y ?? n.y] as const))
     const edgesRf: Edge[] = (state.data.edges ?? []).map((e, idx) => {
       const sourceSelected = selectedIds?.has(e.source) ?? false
       const targetSelected = selectedIds?.has(e.target) ?? false
       const bothSelected = sourceSelected && targetSelected
-      const edgeTopic = topicByNodeId?.get(e.source) ?? '#64748b'
+      const handles = getHandlesByNodeY(nodeYById.get(e.source), nodeYById.get(e.target))
 
       return {
         id: e.id ?? `e-${idx}-${e.source}-${e.target}`,
         source: e.source,
         target: e.target,
+        sourceHandle: handles.sourceHandle,
+        targetHandle: handles.targetHandle,
+        markerEnd: { type: MarkerType.ArrowClosed, width: 24, height: 24, color: '#000000' },
         style:
           highlightTopicId == null
-            ? undefined
+            ? { stroke: '#000000' }
             : {
-                stroke: bothSelected ? edgeTopic : hexToRgba(edgeTopic, 0.35),
+                stroke: '#000000',
                 strokeWidth: bothSelected ? 1.6 : 0.8,
                 opacity: bothSelected ? 0.85 : 0.15,
                 transition: 'opacity 120ms ease, stroke-width 120ms ease, stroke 120ms ease',
               },
-        selectable: false,
+        selectable: true,
         draggable: false,
       }
     })
     setEdges(edgesRf)
-  }, [state, width, height, highlightTopicId, setNodes, setEdges])
+  }, [state, width, height, highlightTopicId, setNodes, setEdges, savedPositions])
+
+  useEffect(() => {
+    if (nodes.length === 0 || edges.length === 0) return
+    const yById = new Map(nodes.map((n) => [n.id, n.position.y] as const))
+    setEdges((prev) => {
+      let changed = false
+      const next = prev.map((edge) => {
+        const handles = getHandlesByNodeY(yById.get(edge.source), yById.get(edge.target))
+        if (edge.sourceHandle === handles.sourceHandle && edge.targetHandle === handles.targetHandle) {
+          return edge
+        }
+        changed = true
+        return { ...edge, sourceHandle: handles.sourceHandle, targetHandle: handles.targetHandle }
+      })
+      return changed ? next : prev
+    })
+  }, [nodes, edges.length, setEdges])
 
   const onMoveStart = useCallback(() => {
     document.body.style.cursor = 'grabbing'
@@ -217,6 +275,97 @@ export function SkillsGraph(props: {
     setSelectedSkill(null)
   }, [])
 
+  const onConnect = useCallback(
+    async (connection: Connection) => {
+      const source = connection.source
+      const target = connection.target
+      if (source == null || target == null || source === target) {
+        return
+      }
+
+      const sourceSkillId = skillIdByNodeId.get(source)
+      const targetSkillId = skillIdByNodeId.get(target)
+      if (sourceSkillId == null || targetSkillId == null) {
+        setEdgeMutationState({ kind: 'error', message: 'Cannot resolve skill IDs for selected edge' })
+        return
+      }
+
+      const edgeId = `temp-${source}-${target}-${Date.now()}`
+      const sourceNode = nodes.find((n) => n.id === source)
+      const targetNode = nodes.find((n) => n.id === target)
+      const handles = getHandlesByNodeY(sourceNode?.position.y, targetNode?.position.y)
+      setEdges((prev) =>
+        addEdge(
+          {
+            id: edgeId,
+            source,
+            target,
+            sourceHandle: handles.sourceHandle,
+            targetHandle: handles.targetHandle,
+            markerEnd: { type: MarkerType.ArrowClosed, width: 24, height: 24, color: '#000000' },
+            style: { stroke: '#000000' },
+            selectable: true,
+          },
+          prev
+        )
+      )
+      setEdgeMutationState({ kind: 'saving' })
+      try {
+        await createSkillPrerequisite({
+          source_skill_id: sourceSkillId,
+          target_skill_id: targetSkillId,
+        })
+        setEdgeMutationState({ kind: 'saved' })
+      } catch (err: unknown) {
+        setEdges((prev) => prev.filter((e) => e.id !== edgeId))
+        const message = err instanceof Error ? err.message : 'Failed to create edge'
+        setEdgeMutationState({ kind: 'error', message })
+      }
+    },
+    [setEdges, skillIdByNodeId, nodes]
+  )
+
+  const onEdgesDelete = useCallback(
+    async (deletedEdges: Edge[]) => {
+      if (deletedEdges.length === 0) return
+      setEdgeMutationState({ kind: 'saving' })
+      try {
+        await Promise.all(
+          deletedEdges.map((edge) => {
+            const sourceSkillId = skillIdByNodeId.get(edge.source)
+            const targetSkillId = skillIdByNodeId.get(edge.target)
+            if (sourceSkillId == null || targetSkillId == null) {
+              throw new Error('Cannot resolve skill IDs for selected edge')
+            }
+            return deleteSkillPrerequisite({
+              source_skill_id: sourceSkillId,
+              target_skill_id: targetSkillId,
+            })
+          })
+        )
+        setEdgeMutationState({ kind: 'saved' })
+      } catch (err: unknown) {
+        setEdges((prev) => [...prev, ...deletedEdges])
+        const message = err instanceof Error ? err.message : 'Failed to delete edge'
+        setEdgeMutationState({ kind: 'error', message })
+      }
+    },
+    [setEdges, skillIdByNodeId]
+  )
+
+  const onSavePositions = useCallback(async () => {
+    const positions = Object.fromEntries(nodes.map((node) => [node.id, node.position]))
+    setSaveState({ kind: 'saving' })
+    try {
+      await saveNodePositions({ positions })
+      setSavedPositions(positions)
+      setSaveState({ kind: 'saved' })
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to save positions'
+      setSaveState({ kind: 'error', message })
+    }
+  }, [nodes])
+
   if (state.kind === 'error') {
     return (
       <div className="panelMessage">
@@ -228,6 +377,24 @@ export function SkillsGraph(props: {
 
   return (
     <div className="graphWrap">
+      <div className="graphActions">
+        <button
+          type="button"
+          className="graphSaveButton"
+          disabled={state.kind !== 'ready' || saveState.kind === 'saving' || !hasUnsavedChanges}
+          onClick={onSavePositions}
+        >
+          {saveState.kind === 'saving' ? 'Saving…' : 'Save positions'}
+        </button>
+        {hasUnsavedChanges && <span className="graphSaveStatus graphSaveStatusWarning">Unsaved changes</span>}
+        {saveState.kind === 'saved' && !hasUnsavedChanges && <span className="graphSaveStatus">Saved</span>}
+        {saveState.kind === 'error' && <span className="graphSaveStatus graphSaveStatusError">{saveState.message}</span>}
+        {edgeMutationState.kind === 'saving' && <span className="graphSaveStatus">Saving edge…</span>}
+        {edgeMutationState.kind === 'saved' && <span className="graphSaveStatus">Edge saved</span>}
+        {edgeMutationState.kind === 'error' && (
+          <span className="graphSaveStatus graphSaveStatusError">{edgeMutationState.message}</span>
+        )}
+      </div>
       {state.kind === 'loading' && (
         <div className="panelMessage">
           <div className="panelTitle">Loading…</div>
@@ -247,6 +414,9 @@ export function SkillsGraph(props: {
         onNodeDragStop={onMoveEnd}
         onNodeClick={onNodeClick}
         onPaneClick={onPaneClick}
+        onConnect={onConnect}
+        onEdgesDelete={onEdgesDelete}
+        deleteKeyCode={['Delete', 'Backspace']}
       >
         <Background />
         <Controls />

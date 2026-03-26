@@ -24,20 +24,26 @@ export const SkillFlowNode = memo(function SkillFlowNode(props: NodeProps<SkillF
 
   return (
     <div className="skill-flow-node" title={label}>
-      <Handle type="target" position={Position.Top} />
+      <Handle id="target-top" type="target" position={Position.Top} />
+      <Handle id="source-top" type="source" position={Position.Top} />
       <div
         style={{
-          whiteSpace: 'nowrap',
+          whiteSpace: 'normal',
+          display: '-webkit-box',
+          WebkitLineClamp: 2,
+          WebkitBoxOrient: 'vertical',
           overflow: 'hidden',
           textOverflow: 'ellipsis',
-          maxWidth: 140,
+          maxWidth: 110,
           fontSize: 11,
           lineHeight: 1.35,
+          textAlign: 'center',
         }}
       >
         {label}
       </div>
-      <Handle type="source" position={Position.Bottom} />
+      <Handle id="target-bottom" type="target" position={Position.Bottom} />
+      <Handle id="source-bottom" type="source" position={Position.Bottom} />
     </div>
   )
 })
