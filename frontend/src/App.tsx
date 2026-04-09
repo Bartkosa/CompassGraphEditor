@@ -14,7 +14,7 @@ function App() {
       <header className="topBar">
         <div className="topBarTitle">Compass Skills Graph</div>
         <div className="topBarHint">
-          Click a skill for details. Drag to rearrange; pan and zoom the canvas.
+          Click a skill for details. Drag to rearrange; hold Shift to mark multiple nodes and move them together.
           {summary && (
             <span className="topBarSummary">
               Topics: {summary.topics} · Skills: {summary.skills}

@@ -408,6 +408,10 @@ export function SkillsGraph(props: {
         onEdgesChange={onEdgesChange}
         nodeTypes={skillFlowNodeTypes}
         nodesDraggable
+        elementsSelectable
+        selectionOnDrag
+        selectionKeyCode={['Shift']}
+        multiSelectionKeyCode={['Shift']}
         fitView
         fitViewOptions={{ padding: 0.2 }}
         onNodeDragStart={onMoveStart}
