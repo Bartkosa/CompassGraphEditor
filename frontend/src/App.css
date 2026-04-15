@@ -5,14 +5,50 @@
 }
 
 .topBar {
-  height: 56px;
+  min-height: 56px;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 16px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  padding: 8px 16px;
   border-bottom: 1px solid rgba(148, 163, 184, 0.25);
   background: rgba(255, 255, 255, 0.7);
   backdrop-filter: blur(8px);
+}
+
+.topBarTopRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 16px;
+}
+
+.topBarToolbarHost {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+  flex: 1 1 280px;
+}
+
+.topBarToolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  width: 100%;
+}
+
+.topBarTitleRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 16px;
+  flex: 0 1 auto;
 }
 
 .topBarTitle {
@@ -21,10 +57,34 @@
   color: #0f172a;
 }
 
+.topBarDataset {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #475569;
+}
+
+.topBarDatasetLabel {
+  font-weight: 500;
+  color: #64748b;
+}
+
+.topBarDatasetSelect {
+  font-size: 12px;
+  color: #0f172a;
+  padding: 4px 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.55);
+  background: rgba(248, 250, 252, 0.98);
+  min-width: 200px;
+}
+
 .topBarHint {
   font-size: 12px;
   color: #475569;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
 }
@@ -59,19 +119,71 @@
   position: relative;
 }
 
-.graphActions {
-  position: absolute;
-  z-index: 25;
-  top: 16px;
-  right: 16px;
+.graphSearchGroup {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
-  background: rgba(255, 255, 255, 0.88);
-  border: 1px solid rgba(148, 163, 184, 0.35);
-  border-radius: 10px;
-  padding: 8px 10px;
-  box-shadow: 0 10px 25px rgba(2, 6, 23, 0.08);
+  gap: 6px;
+  padding-right: 10px;
+  margin-right: 4px;
+  border-right: 1px solid rgba(148, 163, 184, 0.35);
+}
+
+.graphSearchInput {
+  width: min(220px, 36vw);
+  min-width: 0;
+  font-size: 12px;
+  color: #0f172a;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.55);
+  background: rgba(248, 250, 252, 0.98);
+}
+
+.graphSearchInput:disabled {
+  opacity: 0.6;
+}
+
+.graphSearchInput::placeholder {
+  color: #94a3b8;
+}
+
+.graphSearchButton {
+  border: 1px solid rgba(148, 163, 184, 0.55);
+  background: rgba(248, 250, 252, 0.95);
+  color: #0f172a;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, opacity 120ms ease;
+}
+
+.graphSearchButton:hover:not(:disabled) {
+  background: rgba(241, 245, 249, 1);
+  border-color: rgba(100, 116, 139, 0.7);
+}
+
+.graphSearchButton:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.graphSearchButtonMuted {
+  font-weight: 500;
+  color: #475569;
+}
+
+.graphSearchFeedback {
+  font-size: 12px;
+  font-weight: 600;
+  color: #0f766e;
+  white-space: nowrap;
+}
+
+.graphSearchFeedbackError {
+  color: #b91c1c;
 }
 
 .graphSaveButton {

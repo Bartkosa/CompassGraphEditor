@@ -1,4 +1,5 @@
 import type {
+  GraphDataset,
   GraphResponse,
   NodePositions,
   NodePositionsResponse,
@@ -6,18 +7,46 @@ import type {
   SkillPrerequisitePayload,
 } from './types'
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? ''
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').trim().replace(/\/+$/, '')
 
-export async function fetchSkillsGraph(signal?: AbortSignal): Promise<GraphResponse> {
-  const res = await fetch(`${API_BASE_URL}/api/skills-graph`, { signal })
+/** Dataset in the URL path so caches/proxies cannot serve the wrong graph for `?dataset=` alone. */
+function withDatasetPath(prefix: string, dataset: GraphDataset): string {
+  const base = prefix.endsWith('/') ? prefix.slice(0, -1) : prefix
+  return `${base}/${encodeURIComponent(dataset)}`
+}
+
+function apiUrl(path: string): string {
+  if (!API_BASE_URL) {
+    return path.startsWith('/') ? path : `/${path}`
+  }
+  const p = path.startsWith('/') ? path : `/${path}`
+  return `${API_BASE_URL}${p}`
+}
+
+const NO_STORE: RequestCache = 'no-store'
+
+export async function fetchSkillsGraph(
+  dataset: GraphDataset = 'cke',
+  signal?: AbortSignal,
+): Promise<GraphResponse> {
+  const res = await fetch(apiUrl(withDatasetPath('/api/skills-graph', dataset)), {
+    signal,
+    cache: NO_STORE,
+  })
   if (!res.ok) {
     throw new Error(`API error: ${res.status} ${res.statusText}`)
   }
   return (await res.json()) as GraphResponse
 }
 
-export async function fetchNodePositions(signal?: AbortSignal): Promise<NodePositions> {
-  const res = await fetch(`${API_BASE_URL}/api/node-positions`, { signal })
+export async function fetchNodePositions(
+  dataset: GraphDataset = 'cke',
+  signal?: AbortSignal,
+): Promise<NodePositions> {
+  const res = await fetch(apiUrl(withDatasetPath('/api/node-positions', dataset)), {
+    signal,
+    cache: NO_STORE,
+  })
   if (!res.ok) {
     throw new Error(`API error: ${res.status} ${res.statusText}`)
   }
@@ -25,33 +54,45 @@ export async function fetchNodePositions(signal?: AbortSignal): Promise<NodePosi
   return payload.positions ?? {}
 }
 
-export async function saveNodePositions(payload: SaveNodePositionsRequest): Promise<void> {
-  const res = await fetch(`${API_BASE_URL}/api/node-positions`, {
+export async function saveNodePositions(
+  dataset: GraphDataset,
+  payload: SaveNodePositionsRequest,
+): Promise<void> {
+  const res = await fetch(apiUrl(withDatasetPath('/api/node-positions', dataset)), {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
+    cache: NO_STORE,
   })
   if (!res.ok) {
     throw new Error(`API error: ${res.status} ${res.statusText}`)
   }
 }
 
-export async function createSkillPrerequisite(payload: SkillPrerequisitePayload): Promise<void> {
-  const res = await fetch(`${API_BASE_URL}/api/skill-prerequisites`, {
+export async function createSkillPrerequisite(
+  dataset: GraphDataset,
+  payload: SkillPrerequisitePayload,
+): Promise<void> {
+  const res = await fetch(apiUrl(withDatasetPath('/api/skill-prerequisites', dataset)), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
+    cache: NO_STORE,
   })
   if (!res.ok) {
     throw new Error(`API error: ${res.status} ${res.statusText}`)
   }
 }
 
-export async function deleteSkillPrerequisite(payload: SkillPrerequisitePayload): Promise<void> {
-  const res = await fetch(`${API_BASE_URL}/api/skill-prerequisites`, {
+export async function deleteSkillPrerequisite(
+  dataset: GraphDataset,
+  payload: SkillPrerequisitePayload,
+): Promise<void> {
+  const res = await fetch(apiUrl(withDatasetPath('/api/skill-prerequisites', dataset)), {
     method: 'DELETE',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
+    cache: NO_STORE,
   })
   if (!res.ok) {
     throw new Error(`API error: ${res.status} ${res.statusText}`)

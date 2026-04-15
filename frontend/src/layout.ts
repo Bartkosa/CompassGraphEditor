@@ -18,6 +18,7 @@ export type LayoutTuning = {
 
 type Band = 'lower' | 'upper'
 
+/** CKE uses grade ranges; MA topics map a single DB `grade` to both `grade_from` and `grade_to` on the API. */
 function topicBand(t: Topic): Band {
   if (t.grade_from === 4 && t.grade_to === 6) return 'lower'
   if (t.grade_from === 7 && t.grade_to === 8) return 'upper'

@@ -4,9 +4,13 @@ Web app that loads **skills** and **topics** from Postgres and shows them as an 
 
 **Features**
 
+- **Datasets** — Header **Dataset** selector switches between **CKE** (`topics` / `skills`) and **MA** (`ma_topics` / `ma_skills`). Each dataset has its own saved layout and prerequisite table.
 - **Topic legend** — Click a topic in the sidebar to emphasize its skills and dim the rest.
-- **Drag skills** — Move nodes on the canvas; positions survive window resize and topic highlighting until you reload the page (not saved to the database).
-- **Skill details** — Click a node to open a panel with short name, full name (`skills.name`), skill `cke_code`, and topic (name, topic code, grade range).
+- **Find skill** — In the header: search by full name, short name, or skill code (exact match first, then substring). **Find** or **Enter** highlights all matches, brings them forward, and zooms the view to fit. **Clear** removes the highlight and query. Works well for pasted `ma_skills.name` text.
+- **Save positions** — **Save positions** in the header writes the current node coordinates to `backend/data/node_positions.json`, keyed by dataset (`cke` / `ma`). Unsaved drags are kept in memory until you save or reload.
+- **Prerequisites (edges)** — Drag from one skill’s handle to another to create a prerequisite (persisted in Postgres). Select an edge and press **Delete** or **Backspace** to remove it. Hold **Shift** to multi-select nodes or drag-select; status text for save/edge actions appears next to the header controls.
+- **Drag skills** — Move nodes on the canvas. Positions are merged with saved layout on load and after save.
+- **Skill details** — Click a node to open a panel with short name, full name, skill code (`cke_code` / MA `ma_code`), and topic (name, topic code, grade range).
 
 **Stack**
 
@@ -34,7 +38,7 @@ Web app that loads **skills** and **topics** from Postgres and shows them as an 
 
 ## API: `GET /api/skills-graph`
 
-Returns `topics`, `nodes`, and `edges` (edges may be empty). Each node includes fields needed for the graph and the detail panel, for example:
+Query `?dataset=cke` or `?dataset=ma` (default `cke`). Returns `topics`, `nodes`, and `edges`. Each node includes fields needed for the graph and the detail panel, for example:
 
 ```json
 {
@@ -50,6 +54,7 @@ Returns `topics`, `nodes`, and `edges` (edges may be empty). Each node includes 
   "nodes": [
     {
       "id": "<topic_id>:<skill_cke_code>",
+      "skill_id": 1,
       "label": "<short_name>",
       "short_name": "…",
       "name": "…",
@@ -64,5 +69,12 @@ Returns `topics`, `nodes`, and `edges` (edges may be empty). Each node includes 
   "edges": []
 }
 ```
+
+**Node `id` format**
+
+- **CKE:** `<topic_id>:<skill_cke_code>` (topic row id plus skill code string).
+- **MA:** `<topic_id>:<skill_id>` (topic row id plus numeric `ma_skills.id`), because MA codes are not guaranteed unique across topics.
+
+Related endpoints include node position read/write and creating or deleting prerequisite rows (see `backend/main.py`).
 
 On the canvas, pan by dragging empty space, zoom with the controls or wheel, and close the detail panel with **×** or by clicking the background.

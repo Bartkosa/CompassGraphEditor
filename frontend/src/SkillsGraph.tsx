@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { createPortal } from 'react-dom'
 import {
   ReactFlow,
   Background,
@@ -11,6 +12,7 @@ import {
   type Edge,
   type Connection,
   type NodeMouseHandler,
+  type ReactFlowInstance,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 
@@ -21,7 +23,7 @@ import {
   fetchSkillsGraph,
   saveNodePositions,
 } from './api'
-import type { GraphResponse } from './types'
+import type { GraphDataset, GraphResponse, SkillNode } from './types'
 import { topicColor } from './color'
 import { layoutSkillsByTopic } from './layout'
 import { skillFlowNodeTypes } from './skillFlowNodeTypes'
@@ -67,6 +69,109 @@ function hexToRgba(hex: string, alpha: number): string {
   return `rgba(${r},${g},${b},${alpha})`
 }
 
+function skillNodeChromeStyle(
+  topicCkeCode: string,
+  topicId: number,
+  highlightTopicId: number | null | undefined,
+  searchHit: boolean
+): { style: CSSProperties; zIndex?: number } {
+  const base = {
+    padding: '8px 10px',
+    borderRadius: 16,
+    width: 110,
+    minWidth: 110,
+    boxSizing: 'border-box' as const,
+    color: '#111827',
+    transition:
+      'background 120ms ease, border-color 120ms ease, opacity 120ms ease, box-shadow 120ms ease',
+  }
+  const isSelected = highlightTopicId != null && topicId === highlightTopicId
+  const topic = topicColor(topicCkeCode)
+  let topicStyle: CSSProperties
+  if (highlightTopicId == null) {
+    topicStyle = {
+      ...base,
+      border: `1px solid ${topic}`,
+      background: hexToRgba(topic, 0.14),
+    }
+  } else if (isSelected) {
+    topicStyle = {
+      ...base,
+      border: `2px solid ${topic}`,
+      background: hexToRgba(topic, 0.32),
+      boxShadow: `0 10px 22px ${hexToRgba(topic, 0.18)}`,
+      opacity: 1,
+    }
+  } else {
+    topicStyle = {
+      ...base,
+      border: `1px solid ${hexToRgba(topic, 0.35)}`,
+      background: hexToRgba(topic, 0.06),
+      boxShadow: 'none',
+      opacity: 0.28,
+    }
+  }
+  if (searchHit) {
+    return {
+      style: {
+        ...topicStyle,
+        border: '3px solid #2563eb',
+        boxShadow:
+          '0 0 0 3px rgba(37, 99, 235, 0.35), 0 12px 28px rgba(37, 99, 235, 0.22)',
+        opacity: 1,
+      },
+      zIndex: 10,
+    }
+  }
+  return { style: topicStyle, zIndex: undefined }
+}
+
+function normalizeSearchQuery(raw: string): string {
+  return raw
+    .trim()
+    .replace(/\u00a0/g, ' ')
+    .replace(/\s+/g, ' ')
+    .toLowerCase()
+}
+
+function normSkillField(s: string): string {
+  return normalizeSearchQuery(s)
+}
+
+/** Exact match on name / short_name / skill_cke_code, then substring on name, then on short_name / code. */
+function findSkillNodeIdsByQuery(nodes: SkillNode[], rawQuery: string): string[] {
+  const q = normalizeSearchQuery(rawQuery)
+  if (!q) return []
+
+  const exact: string[] = []
+  for (const n of nodes) {
+    const fields = [n.name, n.short_name, n.skill_cke_code].map((f) => normSkillField(f ?? ''))
+    if (fields.some((f) => f === q)) {
+      exact.push(n.id)
+    }
+  }
+  if (exact.length > 0) return exact
+
+  const byName: string[] = []
+  for (const n of nodes) {
+    const name = normSkillField(n.name ?? '')
+    if (name && name.includes(q)) {
+      byName.push(n.id)
+    }
+  }
+  if (byName.length > 0) return byName
+
+  const byShortOrCode: string[] = []
+  for (const n of nodes) {
+    const sn = normSkillField(n.short_name ?? '')
+    const code = normSkillField(n.skill_cke_code ?? '')
+    if ((sn && sn.includes(q)) || (code && code.includes(q))) {
+      byShortOrCode.push(n.id)
+    }
+  }
+  return byShortOrCode
+}
+
 function useWindowSize() {
   const [size, setSize] = useState(() => ({ width: window.innerWidth, height: window.innerHeight }))
   useEffect(() => {
@@ -78,6 +183,9 @@ function useWindowSize() {
 }
 
 export function SkillsGraph(props: {
+  dataset: GraphDataset
+  /** When set, search / save controls render here (e.g. app header). */
+  toolbarPortalEl?: HTMLElement | null
   onTopicsLoaded?: (topics: GraphResponse['topics']) => void
   onSummaryLoaded?: (summary: { topics: number; skills: number }) => void
   highlightTopicId?: number | null
@@ -87,16 +195,25 @@ export function SkillsGraph(props: {
   const [saveState, setSaveState] = useState<SaveState>({ kind: 'idle' })
   const [edgeMutationState, setEdgeMutationState] = useState<EdgeMutationState>({ kind: 'idle' })
   const [selectedSkill, setSelectedSkill] = useState<SelectedSkillDetail | null>(null)
-  const { onTopicsLoaded, onSummaryLoaded, highlightTopicId } = props
+  const [skillSearchInput, setSkillSearchInput] = useState('')
+  const [searchHighlightIds, setSearchHighlightIds] = useState<string[]>([])
+  const [skillSearchMessage, setSkillSearchMessage] = useState<string | null>(null)
+  const reactFlowRef = useRef<ReactFlowInstance | null>(null)
+  const { dataset, toolbarPortalEl, onTopicsLoaded, onSummaryLoaded, highlightTopicId } = props
   const { width, height } = useWindowSize()
 
   useEffect(() => {
     const ctrl = new AbortController()
     Promise.all([
-      fetchSkillsGraph(ctrl.signal),
-      fetchNodePositions(ctrl.signal).catch(() => ({} as Record<string, { x: number; y: number }>)),
+      fetchSkillsGraph(dataset, ctrl.signal),
+      fetchNodePositions(dataset, ctrl.signal).catch(() => ({} as Record<string, { x: number; y: number }>)),
     ])
       .then(([data, positions]) => {
+        if (data.dataset != null && data.dataset !== dataset) {
+          throw new Error(
+            `Graph dataset mismatch: requested ${dataset}, API returned ${data.dataset}. Try a hard refresh or restart the API.`,
+          )
+        }
         setState({ kind: 'ready', data })
         setSavedPositions(positions)
         onTopicsLoaded?.(data.topics)
@@ -107,7 +224,7 @@ export function SkillsGraph(props: {
         setState({ kind: 'error', message: msg })
       })
     return () => ctrl.abort()
-  }, [onTopicsLoaded, onSummaryLoaded])
+  }, [dataset, onTopicsLoaded, onSummaryLoaded])
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
@@ -123,6 +240,49 @@ export function SkillsGraph(props: {
       return saved.x !== node.position.x || saved.y !== node.position.y
     })
   }, [nodes, savedPositions])
+
+  const onFlowInit = useCallback((instance: ReactFlowInstance) => {
+    reactFlowRef.current = instance
+  }, [])
+
+  const runSkillSearch = useCallback(() => {
+    if (state.kind !== 'ready') return
+    if (!skillSearchInput.trim()) {
+      setSearchHighlightIds([])
+      setSkillSearchMessage(null)
+      return
+    }
+    const ids = findSkillNodeIdsByQuery(state.data.nodes, skillSearchInput)
+    if (ids.length === 0) {
+      setSearchHighlightIds([])
+      setSkillSearchMessage('No matching skill')
+      return
+    }
+    setSearchHighlightIds(ids)
+    setSkillSearchMessage(ids.length === 1 ? '1 match' : `${ids.length} matches`)
+  }, [state, skillSearchInput])
+
+  const clearSkillSearch = useCallback(() => {
+    setSkillSearchInput('')
+    setSearchHighlightIds([])
+    setSkillSearchMessage(null)
+  }, [])
+
+  useEffect(() => {
+    if (searchHighlightIds.length === 0) return
+    const inst = reactFlowRef.current
+    if (!inst) return
+    const t = window.setTimeout(() => {
+      if (!inst.viewportInitialized) return
+      void inst.fitView({
+        nodes: searchHighlightIds.map((id) => ({ id })),
+        padding: 0.55,
+        maxZoom: 1,
+        duration: 400,
+      })
+    }, 0)
+    return () => window.clearTimeout(t)
+  }, [searchHighlightIds])
 
   useEffect(() => {
     if (state.kind !== 'ready') {
@@ -144,62 +304,32 @@ export function SkillsGraph(props: {
 
     setNodes((prev) => {
       const posById = new Map(prev.map((n) => [n.id, n.position]))
-      return layout.positioned.map((n) => ({
-        id: n.id,
-        type: 'skill' as const,
-        position: posById.get(n.id) ?? savedPositions[n.id] ?? { x: n.x, y: n.y },
-        data: {
-          label: n.label,
-          short_name: n.short_name,
-          name: n.name,
-          topic_name: n.topic_name,
-          topic_cke_code: n.topic_cke_code,
-          grade_from: n.grade_from,
-          grade_to: n.grade_to,
-          skill_cke_code: n.skill_cke_code,
-        },
-        draggable: true,
-        style: (() => {
-          const base = {
-            padding: '8px 10px',
-            borderRadius: 16,
-            width: 110,
-            minWidth: 110,
-            boxSizing: 'border-box' as const,
-            color: '#111827',
-            transition:
-              'background 120ms ease, border-color 120ms ease, opacity 120ms ease, box-shadow 120ms ease',
-          }
-
-          const isSelected = highlightTopicId != null && n.topic_id === highlightTopicId
-          const topic = topicColor(n.topic_cke_code)
-          if (highlightTopicId == null) {
-            return {
-              ...base,
-              border: `1px solid ${topic}`,
-              background: hexToRgba(topic, 0.14),
-            }
-          }
-
-          if (isSelected) {
-            return {
-              ...base,
-              border: `2px solid ${topic}`,
-              background: hexToRgba(topic, 0.32),
-              boxShadow: `0 10px 22px ${hexToRgba(topic, 0.18)}`,
-              opacity: 1,
-            }
-          }
-
-          return {
-            ...base,
-            border: `1px solid ${hexToRgba(topic, 0.35)}`,
-            background: hexToRgba(topic, 0.06),
-            boxShadow: 'none',
-            opacity: 0.28,
-          }
-        })(),
-      }))
+      return layout.positioned.map((n) => {
+        const { style, zIndex } = skillNodeChromeStyle(
+          n.topic_cke_code,
+          n.topic_id,
+          highlightTopicId,
+          false
+        )
+        return {
+          id: n.id,
+          type: 'skill' as const,
+          position: posById.get(n.id) ?? savedPositions[n.id] ?? { x: n.x, y: n.y },
+          data: {
+            label: n.label,
+            short_name: n.short_name,
+            name: n.name,
+            topic_name: n.topic_name,
+            topic_cke_code: n.topic_cke_code,
+            grade_from: n.grade_from,
+            grade_to: n.grade_to,
+            skill_cke_code: n.skill_cke_code,
+          },
+          draggable: true,
+          zIndex,
+          style,
+        }
+      })
     })
 
     const nodeYById = new Map(layout.positioned.map((n) => [n.id, savedPositions[n.id]?.y ?? n.y] as const))
@@ -230,7 +360,48 @@ export function SkillsGraph(props: {
       }
     })
     setEdges(edgesRf)
-  }, [state, width, height, highlightTopicId, setNodes, setEdges, savedPositions])
+    // Note: `savedPositions` and `searchHighlightIds` are intentionally omitted from deps. Updating
+    // them would rebuild edges from `state.data.edges` only and drop edges added via onConnect.
+  }, [state, width, height, highlightTopicId, setNodes, setEdges])
+
+  useEffect(() => {
+    if (state.kind !== 'ready') return
+    setNodes((prev) => {
+      if (prev.length === 0) return prev
+      let changed = false
+      const next = prev.map((node) => {
+        const sp = savedPositions[node.id]
+        if (!sp) return node
+        if (node.position.x === sp.x && node.position.y === sp.y) return node
+        changed = true
+        return { ...node, position: { x: sp.x, y: sp.y } }
+      })
+      return changed ? next : prev
+    })
+  }, [savedPositions, state.kind, setNodes])
+
+  useEffect(() => {
+    if (state.kind !== 'ready') return
+    const topicIdByNodeId = new Map(state.data.nodes.map((n) => [n.id, n.topic_id] as const))
+    const searchHit = new Set(searchHighlightIds)
+
+    setNodes((prev) => {
+      if (prev.length === 0) return prev
+      return prev.map((node) => {
+        if (node.type !== 'skill') return node
+        const topicId = topicIdByNodeId.get(node.id)
+        if (topicId == null) return node
+        const d = node.data as SkillFlowNodeData
+        const { style, zIndex } = skillNodeChromeStyle(
+          d.topic_cke_code,
+          topicId,
+          highlightTopicId,
+          searchHit.has(node.id)
+        )
+        return { ...node, style, zIndex }
+      })
+    })
+  }, [searchHighlightIds, highlightTopicId, state, setNodes, width, height])
 
   useEffect(() => {
     if (nodes.length === 0 || edges.length === 0) return
@@ -311,7 +482,7 @@ export function SkillsGraph(props: {
       )
       setEdgeMutationState({ kind: 'saving' })
       try {
-        await createSkillPrerequisite({
+        await createSkillPrerequisite(dataset, {
           source_skill_id: sourceSkillId,
           target_skill_id: targetSkillId,
         })
@@ -322,7 +493,7 @@ export function SkillsGraph(props: {
         setEdgeMutationState({ kind: 'error', message })
       }
     },
-    [setEdges, skillIdByNodeId, nodes]
+    [dataset, setEdges, skillIdByNodeId, nodes]
   )
 
   const onEdgesDelete = useCallback(
@@ -337,7 +508,7 @@ export function SkillsGraph(props: {
             if (sourceSkillId == null || targetSkillId == null) {
               throw new Error('Cannot resolve skill IDs for selected edge')
             }
-            return deleteSkillPrerequisite({
+            return deleteSkillPrerequisite(dataset, {
               source_skill_id: sourceSkillId,
               target_skill_id: targetSkillId,
             })
@@ -350,21 +521,21 @@ export function SkillsGraph(props: {
         setEdgeMutationState({ kind: 'error', message })
       }
     },
-    [setEdges, skillIdByNodeId]
+    [dataset, setEdges, skillIdByNodeId]
   )
 
   const onSavePositions = useCallback(async () => {
     const positions = Object.fromEntries(nodes.map((node) => [node.id, node.position]))
     setSaveState({ kind: 'saving' })
     try {
-      await saveNodePositions({ positions })
+      await saveNodePositions(dataset, { positions })
       setSavedPositions(positions)
       setSaveState({ kind: 'saved' })
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Failed to save positions'
       setSaveState({ kind: 'error', message })
     }
-  }, [nodes])
+  }, [dataset, nodes])
 
   if (state.kind === 'error') {
     return (
@@ -377,24 +548,81 @@ export function SkillsGraph(props: {
 
   return (
     <div className="graphWrap">
-      <div className="graphActions">
-        <button
-          type="button"
-          className="graphSaveButton"
-          disabled={state.kind !== 'ready' || saveState.kind === 'saving' || !hasUnsavedChanges}
-          onClick={onSavePositions}
-        >
-          {saveState.kind === 'saving' ? 'Saving…' : 'Save positions'}
-        </button>
-        {hasUnsavedChanges && <span className="graphSaveStatus graphSaveStatusWarning">Unsaved changes</span>}
-        {saveState.kind === 'saved' && !hasUnsavedChanges && <span className="graphSaveStatus">Saved</span>}
-        {saveState.kind === 'error' && <span className="graphSaveStatus graphSaveStatusError">{saveState.message}</span>}
-        {edgeMutationState.kind === 'saving' && <span className="graphSaveStatus">Saving edge…</span>}
-        {edgeMutationState.kind === 'saved' && <span className="graphSaveStatus">Edge saved</span>}
-        {edgeMutationState.kind === 'error' && (
-          <span className="graphSaveStatus graphSaveStatusError">{edgeMutationState.message}</span>
+      {toolbarPortalEl != null &&
+        createPortal(
+          <div className="topBarToolbar">
+            <div className="graphSearchGroup">
+              <input
+                type="search"
+                className="graphSearchInput"
+                placeholder="Skill name or code…"
+                aria-label="Find skill by name or code"
+                value={skillSearchInput}
+                disabled={state.kind !== 'ready'}
+                onChange={(e) => {
+                  setSkillSearchInput(e.target.value)
+                  if (skillSearchMessage === 'No matching skill') {
+                    setSkillSearchMessage(null)
+                  }
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    runSkillSearch()
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className="graphSearchButton"
+                disabled={state.kind !== 'ready'}
+                onClick={runSkillSearch}
+              >
+                Find
+              </button>
+              <button
+                type="button"
+                className="graphSearchButton graphSearchButtonMuted"
+                disabled={
+                  state.kind !== 'ready' || (!skillSearchInput.trim() && searchHighlightIds.length === 0)
+                }
+                onClick={clearSkillSearch}
+              >
+                Clear
+              </button>
+              {skillSearchMessage != null && (
+                <span
+                  className={
+                    skillSearchMessage === 'No matching skill'
+                      ? 'graphSearchFeedback graphSearchFeedbackError'
+                      : 'graphSearchFeedback'
+                  }
+                >
+                  {skillSearchMessage}
+                </span>
+              )}
+            </div>
+            <button
+              type="button"
+              className="graphSaveButton"
+              disabled={state.kind !== 'ready' || saveState.kind === 'saving' || !hasUnsavedChanges}
+              onClick={onSavePositions}
+            >
+              {saveState.kind === 'saving' ? 'Saving…' : 'Save positions'}
+            </button>
+            {hasUnsavedChanges && <span className="graphSaveStatus graphSaveStatusWarning">Unsaved changes</span>}
+            {saveState.kind === 'saved' && !hasUnsavedChanges && <span className="graphSaveStatus">Saved</span>}
+            {saveState.kind === 'error' && (
+              <span className="graphSaveStatus graphSaveStatusError">{saveState.message}</span>
+            )}
+            {edgeMutationState.kind === 'saving' && <span className="graphSaveStatus">Saving edge…</span>}
+            {edgeMutationState.kind === 'saved' && <span className="graphSaveStatus">Edge saved</span>}
+            {edgeMutationState.kind === 'error' && (
+              <span className="graphSaveStatus graphSaveStatusError">{edgeMutationState.message}</span>
+            )}
+          </div>,
+          toolbarPortalEl
         )}
-      </div>
       {state.kind === 'loading' && (
         <div className="panelMessage">
           <div className="panelTitle">Loading…</div>
@@ -421,6 +649,7 @@ export function SkillsGraph(props: {
         onConnect={onConnect}
         onEdgesDelete={onEdgesDelete}
         deleteKeyCode={['Delete', 'Backspace']}
+        onInit={onFlowInit}
       >
         <Background />
         <Controls />
@@ -443,14 +672,14 @@ export function SkillsGraph(props: {
             <dd>{selectedSkill.short_name || '—'}</dd>
             <dt>Name</dt>
             <dd className="skillDetailName">{selectedSkill.name || '—'}</dd>
-            <dt>Skill code (cke_code)</dt>
+            <dt>Skill code</dt>
             <dd>{selectedSkill.skill_cke_code || '—'}</dd>
             <dt>Topic</dt>
             <dd>
               <span className="skillDetailTopicName">{selectedSkill.topic_name || '—'}</span>
               <span className="skillDetailTopicMeta">
                 {' '}
-                (code {selectedSkill.topic_cke_code}, classes {selectedSkill.grade_from}–
+                (topic code {selectedSkill.topic_cke_code}, grades {selectedSkill.grade_from}–
                 {selectedSkill.grade_to})
               </span>
             </dd>

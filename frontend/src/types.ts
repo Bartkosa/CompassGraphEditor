@@ -1,3 +1,5 @@
+export type GraphDataset = 'cke' | 'ma'
+
 export type Topic = {
   /** DB `topics.id` — unique per topic row (distinct from duplicate cke_code). */
   id: number
@@ -27,6 +29,8 @@ export type SkillNode = {
 }
 
 export type GraphResponse = {
+  /** Echoed from the API so clients can detect cache or routing mistakes. */
+  dataset?: GraphDataset
   topics: Topic[]
   nodes: SkillNode[]
   edges: Array<{
