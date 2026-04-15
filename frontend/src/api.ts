@@ -88,10 +88,12 @@ export async function deleteSkillPrerequisite(
   dataset: GraphDataset,
   payload: SkillPrerequisitePayload,
 ): Promise<void> {
-  const res = await fetch(apiUrl(withDatasetPath('/api/skill-prerequisites', dataset)), {
+  const params = new URLSearchParams({
+    source_skill_id: String(payload.source_skill_id),
+    target_skill_id: String(payload.target_skill_id),
+  })
+  const res = await fetch(apiUrl(`${withDatasetPath('/api/skill-prerequisites', dataset)}?${params.toString()}`), {
     method: 'DELETE',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
     cache: NO_STORE,
   })
   if (!res.ok) {

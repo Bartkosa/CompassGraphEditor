@@ -10,6 +10,7 @@ export type SkillFlowNodeData = {
   grade_from: number
   grade_to: number
   skill_cke_code: string
+  ma_code?: string
 }
 
 export type SkillFlowNodeType = Node<SkillFlowNodeData, 'skill'>

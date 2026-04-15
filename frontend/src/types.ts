@@ -26,6 +26,8 @@ export type SkillNode = {
   grade_to: number
   // Original numeric code of the skill (from `skills.cke_code`)
   skill_cke_code: string
+  // Optional MA dataset code.
+  ma_code?: string
 }
 
 export type GraphResponse = {

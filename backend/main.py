@@ -535,18 +535,28 @@ def create_skill_prerequisite_by_path(
 
 @app.delete("/api/skill-prerequisites")
 def delete_skill_prerequisite(
-    payload: Dict[str, Any] = Body(...),
+    source_skill_id: int = Query(...),
+    target_skill_id: int = Query(...),
     dataset: str | None = Query(None),
 ) -> Dict[str, Any]:
     ds = _parse_dataset(dataset)
+    payload = {
+        "source_skill_id": source_skill_id,
+        "target_skill_id": target_skill_id,
+    }
     return _delete_skill_prerequisite_impl(ds, payload)
 
 
 @app.delete("/api/skill-prerequisites/{dataset_path}")
 def delete_skill_prerequisite_by_path(
     dataset_path: str,
-    payload: Dict[str, Any] = Body(...),
+    source_skill_id: int = Query(...),
+    target_skill_id: int = Query(...),
 ) -> Dict[str, Any]:
     ds = _parse_dataset(dataset_path)
+    payload = {
+        "source_skill_id": source_skill_id,
+        "target_skill_id": target_skill_id,
+    }
     return _delete_skill_prerequisite_impl(ds, payload)
 

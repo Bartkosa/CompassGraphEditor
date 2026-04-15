@@ -49,6 +49,7 @@ export type SelectedSkillDetail = {
   grade_from: number
   grade_to: number
   skill_cke_code: string
+  ma_code?: string
 }
 
 function getHandlesByNodeY(sourceY?: number, targetY?: number): { sourceHandle?: string; targetHandle?: string } {
@@ -272,7 +273,7 @@ export function SkillsGraph(props: {
     if (searchHighlightIds.length === 0) return
     const inst = reactFlowRef.current
     if (!inst) return
-    const t = window.setTimeout(() => {
+    const rafId = window.requestAnimationFrame(() => {
       if (!inst.viewportInitialized) return
       void inst.fitView({
         nodes: searchHighlightIds.map((id) => ({ id })),
@@ -280,8 +281,8 @@ export function SkillsGraph(props: {
         maxZoom: 1,
         duration: 400,
       })
-    }, 0)
-    return () => window.clearTimeout(t)
+    })
+    return () => window.cancelAnimationFrame(rafId)
   }, [searchHighlightIds])
 
   useEffect(() => {
@@ -324,6 +325,7 @@ export function SkillsGraph(props: {
             grade_from: n.grade_from,
             grade_to: n.grade_to,
             skill_cke_code: n.skill_cke_code,
+            ma_code: n.ma_code,
           },
           draggable: true,
           zIndex,
@@ -401,7 +403,7 @@ export function SkillsGraph(props: {
         return { ...node, style, zIndex }
       })
     })
-  }, [searchHighlightIds, highlightTopicId, state, setNodes, width, height])
+  }, [searchHighlightIds, highlightTopicId, state, setNodes])
 
   useEffect(() => {
     if (nodes.length === 0 || edges.length === 0) return
@@ -439,6 +441,7 @@ export function SkillsGraph(props: {
       grade_from: d.grade_from,
       grade_to: d.grade_to,
       skill_cke_code: d.skill_cke_code,
+      ma_code: d.ma_code,
     })
   }, [])
 
@@ -536,6 +539,23 @@ export function SkillsGraph(props: {
       setSaveState({ kind: 'error', message })
     }
   }, [dataset, nodes])
+
+  const selectedSkillCodeMeta = (() => {
+    if (dataset === 'ma') {
+      if (selectedSkill?.ma_code) return { code: selectedSkill.ma_code, label: 'MA code' as const }
+      if (selectedSkill?.skill_cke_code) {
+        return { code: selectedSkill.skill_cke_code, label: 'Skill code' as const }
+      }
+      return { code: '', label: 'Code' as const }
+    }
+    if (selectedSkill?.skill_cke_code) {
+      return { code: selectedSkill.skill_cke_code, label: 'Skill code' as const }
+    }
+    if (selectedSkill?.ma_code) return { code: selectedSkill.ma_code, label: 'MA code' as const }
+    return { code: '', label: 'Code' as const }
+  })()
+  const selectedSkillCode = selectedSkillCodeMeta.code
+  const selectedSkillCodeLabel = selectedSkillCodeMeta.label
 
   if (state.kind === 'error') {
     return (
@@ -672,8 +692,8 @@ export function SkillsGraph(props: {
             <dd>{selectedSkill.short_name || '—'}</dd>
             <dt>Name</dt>
             <dd className="skillDetailName">{selectedSkill.name || '—'}</dd>
-            <dt>Skill code</dt>
-            <dd>{selectedSkill.skill_cke_code || '—'}</dd>
+            <dt>{selectedSkillCodeLabel}</dt>
+            <dd>{selectedSkillCode || '—'}</dd>
             <dt>Topic</dt>
             <dd>
               <span className="skillDetailTopicName">{selectedSkill.topic_name || '—'}</span>
