@@ -29,6 +29,7 @@ function App() {
   const [topics, setTopics] = useState<Topic[]>([])
   const [summary, setSummary] = useState<{ topics: number; skills: number } | null>(null)
   const [selectedTopicId, setSelectedTopicId] = useState<number | null>(null)
+  const [topicsVisible, setTopicsVisible] = useState(true)
   const [graphToolbarHost, setGraphToolbarHost] = useState<HTMLDivElement | null>(null)
 
   return (
@@ -54,6 +55,14 @@ function App() {
                 <option value="ma">MA (ma_topics / ma_skills)</option>
               </select>
             </label>
+            <button
+              type="button"
+              className="topBarTopicsToggle"
+              aria-pressed={topicsVisible}
+              onClick={() => setTopicsVisible((prev) => !prev)}
+            >
+              {topicsVisible ? 'Hide topics' : 'Show topics'}
+            </button>
           </div>
           <div className="topBarToolbarHost" ref={setGraphToolbarHost} aria-label="Graph tools" />
         </div>
@@ -77,15 +86,17 @@ function App() {
             highlightTopicId={selectedTopicId}
           />
         </main>
-        <aside className="side">
-          <TopicLegend
-            topics={topics}
-            selectedTopicId={selectedTopicId}
-            onTopicSelect={(topicId) =>
-              setSelectedTopicId((prev) => (prev === topicId ? null : topicId))
-            }
-          />
-        </aside>
+        {topicsVisible && (
+          <aside className="side">
+            <TopicLegend
+              topics={topics}
+              selectedTopicId={selectedTopicId}
+              onTopicSelect={(topicId) =>
+                setSelectedTopicId((prev) => (prev === topicId ? null : topicId))
+              }
+            />
+          </aside>
+        )}
       </div>
     </div>
   )

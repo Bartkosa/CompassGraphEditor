@@ -560,3 +560,18 @@ def delete_skill_prerequisite_by_path(
     }
     return _delete_skill_prerequisite_impl(ds, payload)
 
+
+@app.delete("/api/skill-prerequisites/{dataset_path}/{source_skill_id:int}/{target_skill_id:int}")
+def delete_skill_prerequisite_by_path_ids(
+    dataset_path: str,
+    source_skill_id: int,
+    target_skill_id: int,
+) -> Dict[str, Any]:
+    """Same as query-param delete, but IDs are path segments (avoids proxies stripping ?query on DELETE)."""
+    ds = _parse_dataset(dataset_path)
+    payload = {
+        "source_skill_id": source_skill_id,
+        "target_skill_id": target_skill_id,
+    }
+    return _delete_skill_prerequisite_impl(ds, payload)
+

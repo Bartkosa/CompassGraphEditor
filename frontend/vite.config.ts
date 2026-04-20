@@ -10,4 +10,10 @@ export default defineConfig({
       '/api': { target: 'http://127.0.0.1:8000', changeOrigin: true },
     },
   },
+  preview: {
+    // Same as dev: `vite preview` without VITE_API_BASE_URL must forward `/api` to the backend.
+    proxy: {
+      '/api': { target: 'http://127.0.0.1:8000', changeOrigin: true },
+    },
+  },
 })

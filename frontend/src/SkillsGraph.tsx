@@ -74,7 +74,8 @@ function skillNodeChromeStyle(
   topicCkeCode: string,
   topicId: number,
   highlightTopicId: number | null | undefined,
-  searchHit: boolean
+  searchHit: boolean,
+  neighborhood: { active: boolean; focused: boolean; neighbor: boolean }
 ): { style: CSSProperties; zIndex?: number } {
   const base = {
     padding: '8px 10px',
@@ -112,6 +113,38 @@ function skillNodeChromeStyle(
       opacity: 0.28,
     }
   }
+  if (neighborhood.active) {
+    if (neighborhood.focused) {
+      return {
+        style: {
+          ...topicStyle,
+          border: '3px solid #1d4ed8',
+          boxShadow: '0 0 0 3px rgba(29, 78, 216, 0.22), 0 12px 28px rgba(29, 78, 216, 0.18)',
+          opacity: 1,
+        },
+        zIndex: 20,
+      }
+    }
+    if (neighborhood.neighbor) {
+      return {
+        style: {
+          ...topicStyle,
+          border: '2px solid #2563eb',
+          boxShadow: '0 0 0 2px rgba(37, 99, 235, 0.14), 0 8px 20px rgba(37, 99, 235, 0.12)',
+          opacity: 1,
+        },
+        zIndex: 15,
+      }
+    }
+    return {
+      style: {
+        ...topicStyle,
+        opacity: 0.14,
+        boxShadow: 'none',
+      },
+      zIndex: undefined,
+    }
+  }
   if (searchHit) {
     return {
       style: {
@@ -125,6 +158,52 @@ function skillNodeChromeStyle(
     }
   }
   return { style: topicStyle, zIndex: undefined }
+}
+
+function edgeChromeStyle(opts: {
+  highlightTopicActive: boolean
+  sourceSelected: boolean
+  targetSelected: boolean
+  neighborhoodActive: boolean
+  incidentToFocusedNode: boolean
+}): { style: CSSProperties; markerColor: string } {
+  if (opts.neighborhoodActive) {
+    if (opts.incidentToFocusedNode) {
+      return {
+        style: {
+          stroke: '#1d4ed8',
+          strokeWidth: 2.2,
+          opacity: 1,
+          transition: 'opacity 120ms ease, stroke-width 120ms ease, stroke 120ms ease',
+        },
+        markerColor: '#1d4ed8',
+      }
+    }
+    return {
+      style: {
+        stroke: '#000000',
+        strokeWidth: 0.7,
+        opacity: 0.08,
+        transition: 'opacity 120ms ease, stroke-width 120ms ease, stroke 120ms ease',
+      },
+      markerColor: '#000000',
+    }
+  }
+
+  if (opts.highlightTopicActive) {
+    const bothSelected = opts.sourceSelected && opts.targetSelected
+    return {
+      style: {
+        stroke: '#000000',
+        strokeWidth: bothSelected ? 1.6 : 0.8,
+        opacity: bothSelected ? 0.85 : 0.15,
+        transition: 'opacity 120ms ease, stroke-width 120ms ease, stroke 120ms ease',
+      },
+      markerColor: '#000000',
+    }
+  }
+
+  return { style: { stroke: '#000000' }, markerColor: '#000000' }
 }
 
 function normalizeSearchQuery(raw: string): string {
@@ -229,6 +308,24 @@ export function SkillsGraph(props: {
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
+  const focusedNodeId = selectedSkill?.id ?? null
+  const neighborhood = useMemo(() => {
+    const neighbors = new Set<string>()
+    const incidentEdgeIds = new Set<string>()
+    if (focusedNodeId == null) {
+      return { neighbors, incidentEdgeIds }
+    }
+    for (const edge of edges) {
+      if (edge.source === focusedNodeId) {
+        neighbors.add(edge.target)
+        incidentEdgeIds.add(edge.id)
+      } else if (edge.target === focusedNodeId) {
+        neighbors.add(edge.source)
+        incidentEdgeIds.add(edge.id)
+      }
+    }
+    return { neighbors, incidentEdgeIds }
+  }, [edges, focusedNodeId])
   const skillIdByNodeId = useMemo(() => {
     if (state.kind !== 'ready') return new Map<string, number>()
     return new Map(state.data.nodes.map((n) => [n.id, n.skill_id] as const))
@@ -310,7 +407,8 @@ export function SkillsGraph(props: {
           n.topic_cke_code,
           n.topic_id,
           highlightTopicId,
-          false
+          false,
+          { active: false, focused: false, neighbor: false }
         )
         return {
           id: n.id,
@@ -338,8 +436,14 @@ export function SkillsGraph(props: {
     const edgesRf: Edge[] = (state.data.edges ?? []).map((e, idx) => {
       const sourceSelected = selectedIds?.has(e.source) ?? false
       const targetSelected = selectedIds?.has(e.target) ?? false
-      const bothSelected = sourceSelected && targetSelected
       const handles = getHandlesByNodeY(nodeYById.get(e.source), nodeYById.get(e.target))
+      const edgeStyle = edgeChromeStyle({
+        highlightTopicActive: highlightTopicId != null,
+        sourceSelected,
+        targetSelected,
+        neighborhoodActive: false,
+        incidentToFocusedNode: false,
+      })
 
       return {
         id: e.id ?? `e-${idx}-${e.source}-${e.target}`,
@@ -347,16 +451,8 @@ export function SkillsGraph(props: {
         target: e.target,
         sourceHandle: handles.sourceHandle,
         targetHandle: handles.targetHandle,
-        markerEnd: { type: MarkerType.ArrowClosed, width: 24, height: 24, color: '#000000' },
-        style:
-          highlightTopicId == null
-            ? { stroke: '#000000' }
-            : {
-                stroke: '#000000',
-                strokeWidth: bothSelected ? 1.6 : 0.8,
-                opacity: bothSelected ? 0.85 : 0.15,
-                transition: 'opacity 120ms ease, stroke-width 120ms ease, stroke 120ms ease',
-              },
+        markerEnd: { type: MarkerType.ArrowClosed, width: 24, height: 24, color: edgeStyle.markerColor },
+        style: edgeStyle.style,
         selectable: true,
         draggable: false,
       }
@@ -398,12 +494,60 @@ export function SkillsGraph(props: {
           d.topic_cke_code,
           topicId,
           highlightTopicId,
-          searchHit.has(node.id)
+          searchHit.has(node.id),
+          {
+            active: focusedNodeId != null,
+            focused: focusedNodeId === node.id,
+            neighbor: neighborhood.neighbors.has(node.id),
+          }
         )
         return { ...node, style, zIndex }
       })
     })
-  }, [searchHighlightIds, highlightTopicId, state, setNodes])
+  }, [searchHighlightIds, highlightTopicId, state, setNodes, focusedNodeId, neighborhood])
+
+  useEffect(() => {
+    if (state.kind !== 'ready') return
+    const topicIdByNodeId = new Map(state.data.nodes.map((n) => [n.id, n.topic_id] as const))
+    setEdges((prev) => {
+      if (prev.length === 0) return prev
+      let changed = false
+      const next = prev.map((edge) => {
+        const isIncident = neighborhood.incidentEdgeIds.has(edge.id)
+        const sourceSelected =
+          highlightTopicId != null && topicIdByNodeId.get(edge.source) === highlightTopicId
+        const targetSelected =
+          highlightTopicId != null && topicIdByNodeId.get(edge.target) === highlightTopicId
+        const edgeStyle = edgeChromeStyle({
+          highlightTopicActive: highlightTopicId != null,
+          sourceSelected,
+          targetSelected,
+          neighborhoodActive: focusedNodeId != null,
+          incidentToFocusedNode: isIncident,
+        })
+        const markerColor = edgeStyle.markerColor
+        const prevMarkerColor =
+          edge.markerEnd != null && typeof edge.markerEnd === 'object' && 'color' in edge.markerEnd
+            ? String(edge.markerEnd.color ?? '#000000')
+            : '#000000'
+        if (JSON.stringify(edge.style) === JSON.stringify(edgeStyle.style) && prevMarkerColor === markerColor) {
+          return edge
+        }
+        changed = true
+        return {
+          ...edge,
+          markerEnd: {
+            type: MarkerType.ArrowClosed,
+            width: 24,
+            height: 24,
+            color: markerColor,
+          },
+          style: edgeStyle.style,
+        }
+      })
+      return changed ? next : prev
+    })
+  }, [state, focusedNodeId, neighborhood.incidentEdgeIds, highlightTopicId, setEdges, edges.length])
 
   useEffect(() => {
     if (nodes.length === 0 || edges.length === 0) return
